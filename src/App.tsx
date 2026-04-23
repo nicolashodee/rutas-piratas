@@ -18,9 +18,14 @@ const saveCache = (data) => {
   try { localStorage.setItem(SK_CACHE, JSON.stringify(data)); } catch {}
 };
 
+const describeError = async (res, verb) => {
+  let body = "";
+  try { body = await res.text(); } catch {}
+  return `${verb} ${res.status} ${res.statusText}${body ? " — " + body.slice(0, 200) : ""}`;
+};
 const fetchRemote = async () => {
   const res = await fetch("/api/data", { cache: "no-store" });
-  if (!res.ok) throw new Error(`GET /api/data → ${res.status}`);
+  if (!res.ok) throw new Error(await describeError(res, "GET /api/data"));
   return res.json();
 };
 const pushRemote = async (data, pwd) => {
@@ -32,7 +37,7 @@ const pushRemote = async (data, pwd) => {
     },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(`POST /api/data → ${res.status}`);
+  if (!res.ok) throw new Error(await describeError(res, "POST /api/data"));
   return res.json();
 };
 
@@ -117,42 +122,59 @@ a { color:inherit; text-decoration:none; }
 
 /* ── Hamburger button (mobile only) ── */
 .hamburger {
-  display:none; background:transparent; border:none; padding:8px;
+  display:none; background:transparent; border:none; padding:10px;
   cursor:pointer; color:#ccc; border-radius:8px;
+  flex-shrink:0; z-index:1001;
 }
 .hamburger:hover { background:#1a1a1a; }
 .hamburger span {
   display:block; width:22px; height:2px; background:currentColor;
-  margin:4px 0; transition:transform .2s, opacity .2s;
+  margin:5px 0; transition:transform .25s, opacity .2s;
+  transform-origin:center;
 }
-.hamburger.open span:nth-child(1) { transform:translateY(6px) rotate(45deg); }
+.hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
 .hamburger.open span:nth-child(2) { opacity:0; }
-.hamburger.open span:nth-child(3) { transform:translateY(-6px) rotate(-45deg); }
+.hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+
+/* ── Drawer backdrop ── */
+.drawer-backdrop {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.5);
+  z-index:998; animation:fadeIn .2s ease;
+}
+.sidebar.menu-open ~ .drawer-backdrop,
+.drawer-backdrop.open { display:block; }
 
 /* ── Mobile ── */
 @media (max-width:680px) {
   .shell { flex-direction:column; }
+  /* Sidebar devient un header top + un drawer à droite */
   .sidebar {
     width:100%; height:auto; min-height:0;
     border-right:none; border-bottom:1px solid #222;
     flex-direction:column; overflow:visible; flex-shrink:0;
+    position:relative; z-index:2;
   }
-  /* Header mobile : logo visible + bouton hamburger à droite */
+  /* Header mobile : logo à gauche, hamburger à l'extrême droite */
   .sidebar-logo-block {
     display:flex!important; align-items:center; justify-content:space-between;
-    padding:12px 16px!important;
+    padding:12px 16px!important; gap:12px;
   }
-  .sidebar-logo-block > button { width:auto!important; flex:1; }
-  .hamburger { display:block; }
-  /* Menu repliable : caché par défaut, visible quand .open */
-  .sidebar-nav { display:none!important; }
-  .sidebar.menu-open .sidebar-nav {
+  .sidebar-logo-block > button:first-child { width:auto!important; flex:1; min-width:0; }
+  .hamburger { display:block; margin-left:auto; }
+  /* Drawer : panneau latéral qui slide depuis la droite */
+  .sidebar-nav {
     display:flex!important; flex-direction:column!important;
-    padding:8px 0!important; border-top:1px solid #222;
+    position:fixed!important; top:0; right:0; bottom:0;
+    width:min(280px, 80vw); background:#111;
+    padding:20px 0 20px!important; gap:4px;
+    transform:translateX(100%); transition:transform .28s ease-out;
+    z-index:1000; box-shadow:-8px 0 24px rgba(0,0,0,.4);
+    overflow-y:auto;
   }
+  .sidebar.menu-open .sidebar-nav { transform:translateX(0); }
   .sidebar-bottom { display:none!important; }
-  /* Nav items restent en ligne verticale (comportement desktop) */
-  .nav-item { padding:14px 20px; font-size:14px; }
+  /* Nav items dans le drawer */
+  .nav-item { padding:14px 22px; font-size:15px; }
   .main-scroll { flex:1; height:0; }
 }
 
@@ -341,39 +363,49 @@ function Sidebar({page,onNav,adminOk}) {
   const [menuOpen,setMenuOpen]=useState(false);
   const isActive = id => id===page||(id==="hikes"&&page==="detail");
   const handleNav = id => { setMenuOpen(false); onNav(id); };
+  // Ferme le drawer avec la touche Échap
+  useEffect(()=>{
+    if(!menuOpen) return;
+    const onKey = e => { if(e.key==="Escape") setMenuOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  },[menuOpen]);
   return (
-    <aside className={`sidebar${menuOpen?" menu-open":""}`}>
-      <div className="sidebar-topo" />
-      <div className="sidebar-logo-block" style={{padding:"20px 20px 16px",borderBottom:"1px solid #222",position:"relative",zIndex:1}}>
-        <button onClick={()=>handleNav("home")} style={{display:"flex",flexDirection:"column",gap:6,width:"100%",textAlign:"left",cursor:"pointer"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:26,filter:"grayscale(1) brightness(1.8)"}}>☠️</span>
-            <div className="kara" style={{fontSize:18,color:"#fff",letterSpacing:".1em",lineHeight:1}}>RUTAS PIRATAS</div>
-          </div>
-          <div style={{fontSize:10,color:"#444",letterSpacing:".12em",paddingLeft:2}}>⚓ EUSKAL LURRETAN ABENTURAK</div>
-        </button>
-        <button
-          className={`hamburger${menuOpen?" open":""}`}
-          aria-label={menuOpen?"Cerrar menú":"Abrir menú"}
-          aria-expanded={menuOpen}
-          onClick={()=>setMenuOpen(v=>!v)}
-        >
-          <span /><span /><span />
-        </button>
-      </div>
-      <nav className="sidebar-nav" style={{display:"flex",flexDirection:"column",padding:"8px 0",flex:1,position:"relative",zIndex:1}}>
-        {NAV.map(({id,icon,label})=>(
-          <button key={id} className={`nav-item${isActive(id)?" active":""}`} onClick={()=>handleNav(id)}>
-            <span className="nav-icon" style={{fontSize:16}}>{icon}</span>
-            <span>{label}</span>
-            {id==="admin"&&adminOk&&<span style={{marginLeft:"auto",fontSize:10,color:"#5db85d",background:"rgba(93,184,93,.15)",borderRadius:8,padding:"1px 7px"}}>✓</span>}
+    <>
+      <aside className={`sidebar${menuOpen?" menu-open":""}`}>
+        <div className="sidebar-topo" />
+        <div className="sidebar-logo-block" style={{padding:"20px 20px 16px",borderBottom:"1px solid #222",position:"relative",zIndex:1}}>
+          <button onClick={()=>handleNav("home")} style={{display:"flex",flexDirection:"column",gap:6,width:"100%",textAlign:"left",cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:26,filter:"grayscale(1) brightness(1.8)"}}>☠️</span>
+              <div className="kara" style={{fontSize:18,color:"#fff",letterSpacing:".1em",lineHeight:1}}>RUTAS PIRATAS</div>
+            </div>
+            <div style={{fontSize:10,color:"#444",letterSpacing:".12em",paddingLeft:2}}>⚓ EUSKAL LURRETAN ABENTURAK</div>
           </button>
-        ))}
-      </nav>
-      <div className="sidebar-bottom" style={{padding:"14px 20px",borderTop:"1px solid #222",position:"relative",zIndex:1}}>
-        <div style={{fontSize:10,color:"#333",letterSpacing:".12em",textTransform:"uppercase",textAlign:"center"}}>☠ RUTAS PIRATAS ☠</div>
-      </div>
-    </aside>
+          <button
+            className={`hamburger${menuOpen?" open":""}`}
+            aria-label={menuOpen?"Cerrar menú":"Abrir menú"}
+            aria-expanded={menuOpen}
+            onClick={()=>setMenuOpen(v=>!v)}
+          >
+            <span /><span /><span />
+          </button>
+        </div>
+        <nav className="sidebar-nav" style={{display:"flex",flexDirection:"column",padding:"8px 0",flex:1,position:"relative",zIndex:1}}>
+          {NAV.map(({id,icon,label})=>(
+            <button key={id} className={`nav-item${isActive(id)?" active":""}`} onClick={()=>handleNav(id)}>
+              <span className="nav-icon" style={{fontSize:16}}>{icon}</span>
+              <span>{label}</span>
+              {id==="admin"&&adminOk&&<span style={{marginLeft:"auto",fontSize:10,color:"#5db85d",background:"rgba(93,184,93,.15)",borderRadius:8,padding:"1px 7px"}}>✓</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom" style={{padding:"14px 20px",borderTop:"1px solid #222",position:"relative",zIndex:1}}>
+          <div style={{fontSize:10,color:"#333",letterSpacing:".12em",textTransform:"uppercase",textAlign:"center"}}>☠ RUTAS PIRATAS ☠</div>
+        </div>
+      </aside>
+      {menuOpen && <div className="drawer-backdrop open" onClick={()=>setMenuOpen(false)} />}
+    </>
   );
 }
 
@@ -956,6 +988,7 @@ export default function App() {
   const [selId,   setSelId]   = useState(null);
   const [adminOk, setAdminOk] = useState(false);
   const [syncState, setSyncState] = useState("idle"); // 'idle'|'loading'|'saving'|'error'
+  const [syncError, setSyncError] = useState(""); // message précis d'erreur pour debug
   const adminPwdRef = useRef(""); // conservé en mémoire après unlock pour les POST
 
   // Chargement initial depuis l'API au mount
@@ -969,10 +1002,12 @@ export default function App() {
         setAllRegs(data.regs || {});
         saveCache({ hikes: data.hikes || [], regs: data.regs || {} });
         setSyncState("idle");
+        setSyncError("");
       })
       .catch(err => {
         if (cancelled) return;
-        console.warn("[rutas] fetch initial a échoué, on reste sur le cache :", err);
+        console.warn("[rutas] fetch initial KO (cache utilisé) :", err);
+        setSyncError(String(err?.message || err));
         setSyncState("error");
       });
     return () => { cancelled = true; };
@@ -984,11 +1019,11 @@ export default function App() {
     saveCache(payload);
     setSyncState("saving");
     pushRemote(payload, adminPwdRef.current)
-      .then(() => setSyncState("idle"))
+      .then(() => { setSyncState("idle"); setSyncError(""); })
       .catch(err => {
         console.error("[rutas] sauvegarde distante KO :", err);
+        setSyncError(String(err?.message || err));
         setSyncState("error");
-        alert("⚠️ No se pudo guardar en el servidor. Verifica tu conexión o vuelve a entrar como Capitán.");
       });
   };
   const saveHikes = h => { setHikes(h); persistRemote(h, allRegs); };
@@ -1031,26 +1066,42 @@ export default function App() {
           {page==="detail"&&selectedHike&&<HikeDetail hike={selectedHike} regs={getRegs()} onRegister={addReg} onDeleteReg={delReg} onJoinCar={joinCar} onLeaveCar={leaveCar} onBack={()=>setPage("hikes")} />}
         </main>
       </div>
-      <SyncIndicator state={syncState} />
+      <SyncIndicator state={syncState} error={syncError} />
     </>
   );
 }
 
-// Petit badge discret en bas à droite pour le debug de la sync
-function SyncIndicator({state}) {
+// Badge en bas à droite pour le debug de la sync. En cas d'erreur, clic
+// pour voir le détail (statut HTTP, message du serveur).
+function SyncIndicator({state, error}) {
+  const [expanded, setExpanded] = useState(false);
   if (state === "idle") return null;
   const map = {
-    loading: { bg:"#f5f2ed", color:"#666", text:"Cargando…" },
+    loading: { bg:"#f5f2ed", color:"#666",    text:"Cargando…" },
     saving:  { bg:"#fdf8e1", color:"#7a6b00", text:"Guardando…" },
     error:   { bg:"#fff0e6", color:"#b04a00", text:"⚠ Error de sync" },
   };
   const s = map[state] || map.error;
+  const canExpand = state === "error" && !!error;
   return (
-    <div style={{
-      position:"fixed", bottom:16, right:16, zIndex:1000,
-      background:s.bg, color:s.color, padding:"6px 12px",
-      borderRadius:20, fontSize:12, fontWeight:500,
-      boxShadow:"0 4px 12px rgba(0,0,0,.1)",
-    }}>{s.text}</div>
+    <div
+      onClick={()=>canExpand && setExpanded(v=>!v)}
+      style={{
+        position:"fixed", bottom:16, right:16, zIndex:1000,
+        background:s.bg, color:s.color, padding:"8px 14px",
+        borderRadius:14, fontSize:12, fontWeight:500,
+        boxShadow:"0 4px 16px rgba(0,0,0,.12)",
+        maxWidth:"calc(100vw - 32px)",
+        cursor:canExpand?"pointer":"default",
+      }}
+      title={canExpand ? "Click para ver el detalle" : undefined}
+    >
+      <div>{s.text}{canExpand && !expanded && " — click para detalles"}</div>
+      {canExpand && expanded && (
+        <div style={{marginTop:6, fontSize:11, fontWeight:400, fontFamily:"monospace", whiteSpace:"pre-wrap", wordBreak:"break-all", maxWidth:420}}>
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
