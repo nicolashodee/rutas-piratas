@@ -7,6 +7,7 @@
   NPM_FLAGS = "--no-audit --no-fund"
 
 [functions]
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
 # /api/* → Netlify Functions (doit passer avant le fallback SPA)
