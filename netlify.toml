@@ -6,6 +6,16 @@
   NODE_VERSION = "20"
   NPM_FLAGS = "--no-audit --no-fund"
 
+[functions]
+  node_bundler = "esbuild"
+
+# /api/* → Netlify Functions (doit passer avant le fallback SPA)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
 # SPA fallback : toute route inconnue renvoie index.html
 [[redirects]]
   from = "/*"

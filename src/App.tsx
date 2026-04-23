@@ -1,10 +1,40 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { FONT_B64, TOPO_B64, HERO_B64 } from "./assets.js";
 
-const SK_HIKES = "rp10_hikes";
-const SK_REGS  = "rp10_regs";
-const load = (k,fb) => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):fb; } catch { return fb; } };
-const persist = (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} };
+// ── Persistance partagée via Netlify Function + Netlify Blobs ─────────────────
+// GET  /api/data        → { hikes, regs }
+// POST /api/data        → sauvegarde (requiert header x-admin-pwd)
+// Un cache localStorage sert de fallback offline et évite un flash vide
+// pendant le premier fetch.
+const SK_CACHE = "rp_cache_v1";
+
+const loadCache = () => {
+  try {
+    const v = localStorage.getItem(SK_CACHE);
+    return v ? JSON.parse(v) : { hikes: [], regs: {} };
+  } catch { return { hikes: [], regs: {} }; }
+};
+const saveCache = (data) => {
+  try { localStorage.setItem(SK_CACHE, JSON.stringify(data)); } catch {}
+};
+
+const fetchRemote = async () => {
+  const res = await fetch("/api/data", { cache: "no-store" });
+  if (!res.ok) throw new Error(`GET /api/data → ${res.status}`);
+  return res.json();
+};
+const pushRemote = async (data, pwd) => {
+  const res = await fetch("/api/data", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-admin-pwd": pwd || "",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`POST /api/data → ${res.status}`);
+  return res.json();
+};
 
 const DIFF = [
   { label:"Fácil",       color:"#2d7a3a", bg:"#eaf5ec" },
@@ -21,11 +51,17 @@ const CSS = `
 @font-face { font-family:'Kara'; src:url('data:font/otf;base64,${FONT_B64}') format('opentype'); }
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap');
 
-html,body,#root { margin:0; padding:0; height:100%; font-family:'DM Sans',sans-serif; color:#1a1a18; }
+/* Fallback emoji : assure que les ☠️ 🏴‍☠️ ⚓ 🗺 etc. s'affichent
+   sur tous les devices (Android, Windows, Linux, vieux Safari…). */
+html,body,#root {
+  margin:0; padding:0; height:100%; color:#1a1a18;
+  font-family:'DM Sans', system-ui, sans-serif,
+    'Apple Color Emoji','Segoe UI Emoji','Segoe UI Symbol','Noto Color Emoji','Twemoji Mozilla','EmojiOne Color';
+}
 *,*::before,*::after { box-sizing:border-box; }
 
 input,select,textarea {
-  font-family:'DM Sans',sans-serif; font-size:15px; color:#1a1a18;
+  font-family:inherit; font-size:15px; color:#1a1a18;
   background:#fff; border:1.5px solid #d8d4cc; border-radius:10px;
   padding:10px 14px; width:100%; outline:none;
   transition:border-color .18s,box-shadow .18s; display:block;
@@ -33,7 +69,7 @@ input,select,textarea {
 input:focus,select:focus,textarea:focus { border-color:#3a7a42; box-shadow:0 0 0 3px rgba(58,122,66,.1); }
 input.err,select.err,textarea.err { border-color:#e53e3e!important; box-shadow:0 0 0 3px rgba(229,62,62,.1)!important; }
 select { appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 14px center; padding-right:36px; }
-button { font-family:'DM Sans',sans-serif; cursor:pointer; border:none; background:none; }
+button { font-family:inherit; cursor:pointer; border:none; background:none; }
 a { color:inherit; text-decoration:none; }
 ::-webkit-scrollbar { width:5px; }
 ::-webkit-scrollbar-thumb { background:#ccc8c0; border-radius:3px; }
@@ -79,25 +115,44 @@ a { color:inherit; text-decoration:none; }
 .nav-item:hover { background:#1a1a1a; color:#ccc; }
 .nav-item.active { border-left:3px solid #5db85d; color:#5db85d; background:#161616; font-weight:600; }
 
+/* ── Hamburger button (mobile only) ── */
+.hamburger {
+  display:none; background:transparent; border:none; padding:8px;
+  cursor:pointer; color:#ccc; border-radius:8px;
+}
+.hamburger:hover { background:#1a1a1a; }
+.hamburger span {
+  display:block; width:22px; height:2px; background:currentColor;
+  margin:4px 0; transition:transform .2s, opacity .2s;
+}
+.hamburger.open span:nth-child(1) { transform:translateY(6px) rotate(45deg); }
+.hamburger.open span:nth-child(2) { opacity:0; }
+.hamburger.open span:nth-child(3) { transform:translateY(-6px) rotate(-45deg); }
+
 /* ── Mobile ── */
 @media (max-width:680px) {
   .shell { flex-direction:column; }
   .sidebar {
     width:100%; height:auto; min-height:0;
     border-right:none; border-bottom:1px solid #222;
-    flex-direction:row; overflow-x:auto; overflow-y:hidden; flex-shrink:0;
+    flex-direction:column; overflow:visible; flex-shrink:0;
   }
-  .sidebar-logo-block { display:none!important; }
+  /* Header mobile : logo visible + bouton hamburger à droite */
+  .sidebar-logo-block {
+    display:flex!important; align-items:center; justify-content:space-between;
+    padding:12px 16px!important;
+  }
+  .sidebar-logo-block > button { width:auto!important; flex:1; }
+  .hamburger { display:block; }
+  /* Menu repliable : caché par défaut, visible quand .open */
+  .sidebar-nav { display:none!important; }
+  .sidebar.menu-open .sidebar-nav {
+    display:flex!important; flex-direction:column!important;
+    padding:8px 0!important; border-top:1px solid #222;
+  }
   .sidebar-bottom { display:none!important; }
-  .sidebar-nav { flex-direction:row!important; padding:0!important; gap:0!important; }
-  .nav-item {
-    flex-direction:column; gap:3px; padding:10px 12px; font-size:11px;
-    border-left:none; border-bottom:3px solid transparent;
-    flex:1; justify-content:center; align-items:center; white-space:nowrap; min-width:60px;
-  }
-  .nav-item:hover { background:#1a1a1a; }
-  .nav-item.active { border-left:none; border-bottom:3px solid #5db85d; background:#161616; }
-  .nav-icon { font-size:18px; }
+  /* Nav items restent en ligne verticale (comportement desktop) */
+  .nav-item { padding:14px 20px; font-size:14px; }
   .main-scroll { flex:1; height:0; }
 }
 
@@ -283,22 +338,32 @@ const NAV = [
 ];
 
 function Sidebar({page,onNav,adminOk}) {
+  const [menuOpen,setMenuOpen]=useState(false);
   const isActive = id => id===page||(id==="hikes"&&page==="detail");
+  const handleNav = id => { setMenuOpen(false); onNav(id); };
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${menuOpen?" menu-open":""}`}>
       <div className="sidebar-topo" />
       <div className="sidebar-logo-block" style={{padding:"20px 20px 16px",borderBottom:"1px solid #222",position:"relative",zIndex:1}}>
-        <button onClick={()=>onNav("home")} style={{display:"flex",flexDirection:"column",gap:6,width:"100%",textAlign:"left",cursor:"pointer"}}>
+        <button onClick={()=>handleNav("home")} style={{display:"flex",flexDirection:"column",gap:6,width:"100%",textAlign:"left",cursor:"pointer"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:26,filter:"grayscale(1) brightness(1.8)"}}>☠️</span>
             <div className="kara" style={{fontSize:18,color:"#fff",letterSpacing:".1em",lineHeight:1}}>RUTAS PIRATAS</div>
           </div>
           <div style={{fontSize:10,color:"#444",letterSpacing:".12em",paddingLeft:2}}>⚓ EUSKAL LURRETAN ABENTURAK</div>
         </button>
+        <button
+          className={`hamburger${menuOpen?" open":""}`}
+          aria-label={menuOpen?"Cerrar menú":"Abrir menú"}
+          aria-expanded={menuOpen}
+          onClick={()=>setMenuOpen(v=>!v)}
+        >
+          <span /><span /><span />
+        </button>
       </div>
       <nav className="sidebar-nav" style={{display:"flex",flexDirection:"column",padding:"8px 0",flex:1,position:"relative",zIndex:1}}>
         {NAV.map(({id,icon,label})=>(
-          <button key={id} className={`nav-item${isActive(id)?" active":""}`} onClick={()=>onNav(id)}>
+          <button key={id} className={`nav-item${isActive(id)?" active":""}`} onClick={()=>handleNav(id)}>
             <span className="nav-icon" style={{fontSize:16}}>{icon}</span>
             <span>{label}</span>
             {id==="admin"&&adminOk&&<span style={{marginLeft:"auto",fontSize:10,color:"#5db85d",background:"rgba(93,184,93,.15)",borderRadius:8,padding:"1px 7px"}}>✓</span>}
@@ -315,7 +380,7 @@ function Sidebar({page,onNav,adminOk}) {
 // ── Admin login ───────────────────────────────────────────────────────────────
 function AdminLogin({onUnlock}) {
   const [pwd,setPwd]=useState("");const [err,setErr]=useState(false);
-  const try_=()=>pwd==="piratas2024"?onUnlock():setErr(true);
+  const try_=()=>pwd==="piratas2024"?onUnlock(pwd):setErr(true);
   return (
     <div style={{maxWidth:380,margin:"40px auto",padding:16}}>
       <Card style={{padding:28}}>
@@ -884,14 +949,50 @@ function HikeDetail({hike,regs,onRegister,onDeleteReg,onJoinCar,onLeaveCar,onBac
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [hikes,   setHikes]   = useState(()=>load(SK_HIKES,[]));
-  const [allRegs, setAllRegs] = useState(()=>load(SK_REGS,{}));
+  const initial = loadCache();
+  const [hikes,   setHikes]   = useState(initial.hikes || []);
+  const [allRegs, setAllRegs] = useState(initial.regs || {});
   const [page,    setPage]    = useState("home");
   const [selId,   setSelId]   = useState(null);
   const [adminOk, setAdminOk] = useState(false);
+  const [syncState, setSyncState] = useState("idle"); // 'idle'|'loading'|'saving'|'error'
+  const adminPwdRef = useRef(""); // conservé en mémoire après unlock pour les POST
 
-  const saveHikes=h=>{setHikes(h);persist(SK_HIKES,h);};
-  const saveRegs=r=>{setAllRegs(r);persist(SK_REGS,r);};
+  // Chargement initial depuis l'API au mount
+  useEffect(() => {
+    let cancelled = false;
+    setSyncState("loading");
+    fetchRemote()
+      .then(data => {
+        if (cancelled) return;
+        setHikes(data.hikes || []);
+        setAllRegs(data.regs || {});
+        saveCache({ hikes: data.hikes || [], regs: data.regs || {} });
+        setSyncState("idle");
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.warn("[rutas] fetch initial a échoué, on reste sur le cache :", err);
+        setSyncState("error");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Sauvegarde distante + cache local à chaque mutation
+  const persistRemote = (hikesNext, regsNext) => {
+    const payload = { hikes: hikesNext, regs: regsNext };
+    saveCache(payload);
+    setSyncState("saving");
+    pushRemote(payload, adminPwdRef.current)
+      .then(() => setSyncState("idle"))
+      .catch(err => {
+        console.error("[rutas] sauvegarde distante KO :", err);
+        setSyncState("error");
+        alert("⚠️ No se pudo guardar en el servidor. Verifica tu conexión o vuelve a entrar como Capitán.");
+      });
+  };
+  const saveHikes = h => { setHikes(h); persistRemote(h, allRegs); };
+  const saveRegs  = r => { setAllRegs(r); persistRemote(hikes, r); };
   const upsertHike=hike=>{const up=hikes.find(h=>h.id===hike.id)?hikes.map(h=>h.id===hike.id?hike:h):[...hikes,hike];saveHikes(up.sort((a,b)=>new Date(a.date)-new Date(b.date)));};
   const deleteHike=id=>{saveHikes(hikes.filter(h=>h.id!==id));const r={...allRegs};delete r[id];saveRegs(r);};
   const getRegs=()=>allRegs[selId]||[];
@@ -924,12 +1025,32 @@ export default function App() {
       <div className="shell">
         <Sidebar page={page} onNav={navigate} adminOk={adminOk} />
         <main className="main-scroll">
-          {page==="admin"&&!adminOk&&<AdminLogin onUnlock={()=>setAdminOk(true)} />}
+          {page==="admin"&&!adminOk&&<AdminLogin onUnlock={pwd=>{adminPwdRef.current=pwd;setAdminOk(true);}} />}
           {page==="admin"&&adminOk&&<AdminPanel hikes={hikes} allRegs={allRegs} onSave={upsertHike} onDeleteHike={deleteHike} />}
           {page==="hikes"&&<HikeList hikes={hikes} allRegs={allRegs} onSelect={id=>{setSelId(id);setPage("detail");}} />}
           {page==="detail"&&selectedHike&&<HikeDetail hike={selectedHike} regs={getRegs()} onRegister={addReg} onDeleteReg={delReg} onJoinCar={joinCar} onLeaveCar={leaveCar} onBack={()=>setPage("hikes")} />}
         </main>
       </div>
+      <SyncIndicator state={syncState} />
     </>
+  );
+}
+
+// Petit badge discret en bas à droite pour le debug de la sync
+function SyncIndicator({state}) {
+  if (state === "idle") return null;
+  const map = {
+    loading: { bg:"#f5f2ed", color:"#666", text:"Cargando…" },
+    saving:  { bg:"#fdf8e1", color:"#7a6b00", text:"Guardando…" },
+    error:   { bg:"#fff0e6", color:"#b04a00", text:"⚠ Error de sync" },
+  };
+  const s = map[state] || map.error;
+  return (
+    <div style={{
+      position:"fixed", bottom:16, right:16, zIndex:1000,
+      background:s.bg, color:s.color, padding:"6px 12px",
+      borderRadius:20, fontSize:12, fontWeight:500,
+      boxShadow:"0 4px 12px rgba(0,0,0,.1)",
+    }}>{s.text}</div>
   );
 }
