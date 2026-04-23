@@ -1,12 +1,13 @@
 // Health-check : vérifie que la Function tourne et que les Blobs sont dispo.
 // Accessible via /api/ping (redirect netlify.toml) ou /.netlify/functions/ping.
 
-import { getStore } from "@netlify/blobs";
+import { connectLambda, getStore } from "@netlify/blobs";
 
-export const handler = async () => {
+export const handler = async (event) => {
   let blobs = "unknown";
   let blobsError;
   try {
+    connectLambda(event);
     const store = getStore("rutas-piratas");
     await store.get("__ping__");
     blobs = "available";

@@ -3,7 +3,7 @@
 // - POST /.netlify/functions/data  → sauvegarde (header x-admin-pwd requis)
 // La route publique /api/data est gérée par le redirect dans netlify.toml.
 
-import { getStore } from "@netlify/blobs";
+import { connectLambda, getStore } from "@netlify/blobs";
 
 const STORE_NAME = "rutas-piratas";
 const KEY = "data";
@@ -27,6 +27,11 @@ const json = (statusCode, body) => ({
 
 export const handler = async (event) => {
   try {
+    // Nécessaire en handler classique : extrait siteID/token du contexte
+    // Netlify injecté dans l'event. Sans ça, getStore() échoue avec
+    // "The environment has not been configured to use Netlify Blobs".
+    connectLambda(event);
+
     const method = (event.httpMethod || "").toUpperCase();
     if (method === "OPTIONS") {
       return { statusCode: 204, headers: CORS, body: "" };
