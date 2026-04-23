@@ -1,0 +1,20 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--no-audit --no-fund"
+
+# SPA fallback : toute route inconnue renvoie index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Context-specific logs : plus verbeux sur les deploy previews pour debug
+[context.deploy-preview.environment]
+  VITE_DEBUG = "true"
+
+[context.branch-deploy.environment]
+  VITE_DEBUG = "true"
