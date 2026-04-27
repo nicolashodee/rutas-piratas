@@ -1,0 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    color: theme('colors.ink');
+    background: theme('colors.paper');
+    font-family: theme('fontFamily.sans');
+  }
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+}
+
+/* Font Kara (police d'identité) — sera servie depuis /public/fonts/ */
+@font-face {
+  font-family: 'Kara';
+  src: url('/fonts/Kara.otf') format('opentype');
+  font-display: swap;
+}
